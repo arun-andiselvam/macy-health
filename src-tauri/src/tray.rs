@@ -180,11 +180,17 @@ pub fn rebuild_menu(app: &AppHandle) {
     }
 }
 
-pub fn set_status(app: &AppHandle, text: &str) {
+/// Updates the menu's status line, the tooltip, and the countdown beside the
+/// icon (macOS and Linux; Windows trays can't show text, so it gets the tooltip).
+pub fn set_status(app: &AppHandle, text: &str, title: Option<&str>) {
     if let Some(state) = app.try_state::<TrayStatus>() {
         if let Some(status) = state.0.lock().unwrap().as_ref() {
             let _ = status.set_text(text);
         }
+    }
+    if let Some(tray) = app.tray_by_id(TRAY_ID) {
+        let _ = tray.set_title(title);
+        let _ = tray.set_tooltip(Some(format!("Macy Health: {text}")));
     }
 }
 

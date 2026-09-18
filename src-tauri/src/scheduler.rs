@@ -185,10 +185,7 @@ impl Scheduler {
             return format!("Paused until {}", self.describe_until(until, now));
         }
         let enabled = || self.entries.iter().filter(|e| e.reminder.enabled);
-        let next = enabled()
-            .filter(|e| !e.showing && e.reminder.is_active_at((self.local)(e.next_due)))
-            .min_by_key(|e| e.next_due);
-        match next {
+        match self.next_up() {
             Some(e) => format!(
                 "Next: {} {} {}",
                 e.reminder.emoji,
@@ -203,6 +200,29 @@ impl Scheduler {
 }
 
 impl Scheduler {
+    /// Short text beside the menu-bar icon: "👀 7m", "💧 1h 5m", "Paused".
+    /// None when there's nothing coming up.
+    pub fn menu_bar_text(&self, now: u64) -> Option<String> {
+        if self.away {
+            return None;
+        }
+        if self.paused_until.is_some() {
+            return Some("Paused".into());
+        }
+        self.next_up().map(|e| {
+            let left = short_remaining(e.next_due.saturating_sub(now), self.minute_ms);
+            format!("{} {left}", e.reminder.emoji)
+        })
+    }
+
+    fn next_up(&self) -> Option<&Entry> {
+        self.entries
+            .iter()
+            .filter(|e| e.reminder.enabled && !e.showing)
+            .filter(|e| e.reminder.is_active_at((self.local)(e.next_due)))
+            .min_by_key(|e| e.next_due)
+    }
+
     /// "14:30", or "tomorrow" for a pause that ends at midnight.
     fn describe_until(&self, until: u64, now: u64) -> String {
         let (end, today) = ((self.local)(until), (self.local)(now));
@@ -215,12 +235,20 @@ impl Scheduler {
 }
 
 fn format_remaining(ms: u64, minute_ms: u64) -> String {
+    match short_remaining(ms, minute_ms).as_str() {
+        "now" => "now".into(),
+        short => format!("in {short}"),
+    }
+}
+
+/// "now", "7m", "1h", "1h 5m" (minutes rounded up).
+fn short_remaining(ms: u64, minute_ms: u64) -> String {
     let minutes = ms.div_ceil(minute_ms);
     match (minutes / 60, minutes % 60) {
         (0, 0) => "now".into(),
-        (0, m) => format!("in {m}m"),
-        (h, 0) => format!("in {h}h"),
-        (h, m) => format!("in {h}h {m}m"),
+        (0, m) => format!("{m}m"),
+        (h, 0) => format!("{h}h"),
+        (h, m) => format!("{h}h {m}m"),
     }
 }
 
@@ -314,7 +342,14 @@ pub fn status_text(app: &AppHandle) -> String {
 }
 
 pub fn refresh_status(app: &AppHandle) {
-    crate::tray::set_status(app, &status_text(app));
+    let (status, title) = {
+        let state = app.state::<SchedulerState>();
+        let scheduler = state.lock().unwrap();
+        let now = now_ms();
+        (scheduler.status_text(now), scheduler.menu_bar_text(now))
+    };
+    let title = title.filter(|_| crate::settings::general(app).show_countdown);
+    crate::tray::set_status(app, &status, title.as_deref());
 }
 
 pub fn handle_action(app: &AppHandle, id: &str, action: PopupAction) {
@@ -536,6 +571,26 @@ mod tests {
         assert_eq!(s.status_text(13 * 60 * MIN), "Paused until 14:30");
         s.pause(24 * 60 * MIN); // Tuesday 00:00
         assert_eq!(s.status_text(20 * 60 * MIN), "Paused until tomorrow");
+    }
+
+    #[test]
+    fn menu_bar_text() {
+        let mut s = scheduler(presets());
+        assert_eq!(s.menu_bar_text(8 * MIN).as_deref(), Some("👀 12m"));
+        assert_eq!(s.menu_bar_text(20 * MIN - 1).as_deref(), Some("👀 1m"));
+        s.pause(100 * MIN);
+        assert_eq!(s.menu_bar_text(30 * MIN).as_deref(), Some("Paused"));
+        s.resume(30 * MIN);
+        s.set_away(true, 31 * MIN);
+        assert_eq!(s.menu_bar_text(31 * MIN), None);
+    }
+
+    #[test]
+    fn menu_bar_text_none_when_all_off() {
+        let mut r = presets().remove(0);
+        r.enabled = false;
+        let s = scheduler(vec![r]);
+        assert_eq!(s.menu_bar_text(0), None);
     }
 
     #[test]

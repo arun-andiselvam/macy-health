@@ -46,6 +46,8 @@ pub struct General {
     pub popup_seconds: u64,
     /// Persisted copy of the scheduler's pause (epoch ms).
     pub paused_until: Option<u64>,
+    /// Time until the next reminder, beside the menu-bar icon.
+    pub show_countdown: bool,
 }
 
 impl Default for General {
@@ -54,6 +56,7 @@ impl Default for General {
             idle_pause_minutes: 5,
             popup_seconds: 30,
             paused_until: None,
+            show_countdown: true,
         }
     }
 }
@@ -72,6 +75,7 @@ pub struct GeneralView {
     idle_pause_minutes: u64,
     popup_seconds: u64,
     paused_until: Option<u64>,
+    show_countdown: bool,
 }
 
 fn path(app: &AppHandle) -> Option<PathBuf> {
@@ -244,6 +248,7 @@ fn general_view(app: &AppHandle) -> GeneralView {
         idle_pause_minutes: general.idle_pause_minutes,
         popup_seconds: general.popup_seconds,
         paused_until: app.state::<SchedulerState>().lock().unwrap().paused_until(),
+        show_countdown: general.show_countdown,
     }
 }
 
@@ -291,6 +296,7 @@ pub fn save_general(
     launch_at_login: bool,
     idle_pause_minutes: u64,
     popup_seconds: u64,
+    show_countdown: bool,
 ) -> Result<GeneralView, String> {
     if !IDLE_CHOICES.contains(&idle_pause_minutes) {
         return Err("Choose one of the listed away times.".into());
@@ -314,8 +320,10 @@ pub fn save_general(
         let mut general = state.lock().unwrap();
         general.idle_pause_minutes = idle_pause_minutes;
         general.popup_seconds = popup_seconds;
+        general.show_countdown = show_countdown;
     }
     persist(&app)?;
+    scheduler::refresh_status(&app);
     let view = general_view(&app);
     let _ = app.emit(GENERAL_CHANGED_EVENT, &view);
     Ok(view)
@@ -348,5 +356,6 @@ mod tests {
         assert_eq!(file.general.idle_pause_minutes, 5);
         assert_eq!(file.general.popup_seconds, 30);
         assert!(file.general.paused_until.is_none());
+        assert!(file.general.show_countdown);
     }
 }

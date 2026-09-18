@@ -18,7 +18,9 @@ const POPUP_CHOICES = [
 
 type Props = {
   general: General;
-  onChange: (next: Pick<General, "launchAtLogin" | "idlePauseMinutes" | "popupSeconds">) => void;
+  onChange: (
+    next: Pick<General, "launchAtLogin" | "idlePauseMinutes" | "popupSeconds" | "showCountdown">,
+  ) => void;
   onPause: (minutes: number | null) => void;
   onResume: () => void;
 };
@@ -33,8 +35,8 @@ export function describePause(until: number) {
 
 export function GeneralSettings({ general, onChange, onPause, onResume }: Props) {
   const id = useId();
-  const { launchAtLogin, idlePauseMinutes, popupSeconds, pausedUntil } = general;
-  const base = { launchAtLogin, idlePauseMinutes, popupSeconds };
+  const { launchAtLogin, idlePauseMinutes, popupSeconds, pausedUntil, showCountdown } = general;
+  const base = { launchAtLogin, idlePauseMinutes, popupSeconds, showCountdown };
 
   return (
     <ul className="group general">
@@ -65,6 +67,25 @@ export function GeneralSettings({ general, onChange, onPause, onResume }: Props)
               </button>
             </>
           )}
+        </div>
+      </li>
+
+      <li className="setting">
+        <div className="setting-text">
+          <span className="setting-title" id={`${id}-countdown`}>
+            Show time left in the menu bar
+          </span>
+          <span className="setting-help">Shows the next reminder beside the icon, like 👀 7m.</span>
+        </div>
+        <div className="setting-control">
+          <button
+            type="button"
+            role="switch"
+            className="switch"
+            aria-checked={showCountdown}
+            aria-labelledby={`${id}-countdown`}
+            onClick={() => onChange({ ...base, showCountdown: !showCountdown })}
+          />
         </div>
       </li>
 
