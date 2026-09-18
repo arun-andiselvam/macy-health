@@ -37,6 +37,16 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "category": "HealthcareAndFitness",
+    "shortDescription": "Gentle reminders to drink water, rest your eyes and stand up.",
+    "longDescription": "Macy Health lives in your menu bar and reminds you to drink water, rest your eyes and stand up, on a schedule you choose.",
+    "copyright": "\u00a9 2026 HITASOFT TECHNOLOGY SOLUTIONS PRIVATE LIMITED",
+    "publisher": "HITASOFT TECHNOLOGY SOLUTIONS PRIVATE LIMITED",
+    "macOS": {
+      "signingIdentity": "Developer ID Application: HITASOFT TECHNOLOGY SOLUTIONS PRIVATE LIMITED (PQH88KC8RZ)",
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "11.0"
+    }
   }
 }
