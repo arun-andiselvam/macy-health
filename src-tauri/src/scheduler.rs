@@ -200,19 +200,31 @@ impl Scheduler {
 }
 
 impl Scheduler {
-    /// Short text beside the menu-bar icon: "👀 7m", "💧 1h 5m", "Paused".
-    /// None when there's nothing coming up.
-    pub fn menu_bar_text(&self, now: u64) -> Option<String> {
-        if self.away {
-            return None;
-        }
-        if self.paused_until.is_some() {
-            return Some("Paused".into());
-        }
-        self.next_up().map(|e| {
-            let left = short_remaining(e.next_due.saturating_sub(now), self.minute_ms);
-            format!("{} {left}", e.reminder.emoji)
-        })
+    /// Tray menu label per reminder: "💧 Drink water (in 12m)". No time is
+    /// shown while paused, away, or for reminders that are off.
+    pub fn menu_labels(&self, now: u64) -> Vec<(String, String)> {
+        let quiet = self.away || self.paused_until.is_some();
+        self.entries
+            .iter()
+            .map(|e| {
+                let r = &e.reminder;
+                let name = format!("{} {}", r.emoji, r.title);
+                let when = if !r.enabled || quiet {
+                    None
+                } else if e.showing {
+                    Some("on screen".to_string())
+                } else if !r.is_active_at((self.local)(e.next_due)) {
+                    Some("outside active hours".to_string())
+                } else {
+                    Some(format_remaining(
+                        e.next_due.saturating_sub(now),
+                        self.minute_ms,
+                    ))
+                };
+                let label = when.map_or(name.clone(), |w| format!("{name} ({w})"));
+                (r.id.clone(), label)
+            })
+            .collect()
     }
 
     fn next_up(&self) -> Option<&Entry> {
@@ -342,14 +354,20 @@ pub fn status_text(app: &AppHandle) -> String {
 }
 
 pub fn refresh_status(app: &AppHandle) {
-    let (status, title) = {
+    let (status, labels) = {
         let state = app.state::<SchedulerState>();
         let scheduler = state.lock().unwrap();
         let now = now_ms();
-        (scheduler.status_text(now), scheduler.menu_bar_text(now))
+        (scheduler.status_text(now), scheduler.menu_labels(now))
     };
-    let title = title.filter(|_| crate::settings::general(app).show_countdown);
-    crate::tray::set_status(app, &status, title.as_deref());
+    crate::tray::set_status(app, &status, &labels);
+}
+
+pub fn menu_labels(app: &AppHandle) -> Vec<(String, String)> {
+    app.state::<SchedulerState>()
+        .lock()
+        .unwrap()
+        .menu_labels(now_ms())
 }
 
 pub fn handle_action(app: &AppHandle, id: &str, action: PopupAction) {
@@ -574,23 +592,41 @@ mod tests {
     }
 
     #[test]
-    fn menu_bar_text() {
+    fn menu_labels_show_time_left_per_reminder() {
         let mut s = scheduler(presets());
-        assert_eq!(s.menu_bar_text(8 * MIN).as_deref(), Some("👀 12m"));
-        assert_eq!(s.menu_bar_text(20 * MIN - 1).as_deref(), Some("👀 1m"));
+        let labels = |s: &Scheduler, t| {
+            s.menu_labels(t)
+                .into_iter()
+                .map(|(_, l)| l)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            labels(&s, 8 * MIN),
+            [
+                "💧 Drink water (in 37m)",
+                "👀 Rest your eyes (in 12m)",
+                "🧍 Stand up (in 52m)"
+            ]
+        );
+        s.tick(20 * MIN);
+        assert_eq!(labels(&s, 20 * MIN)[1], "👀 Rest your eyes (on screen)");
         s.pause(100 * MIN);
-        assert_eq!(s.menu_bar_text(30 * MIN).as_deref(), Some("Paused"));
-        s.resume(30 * MIN);
-        s.set_away(true, 31 * MIN);
-        assert_eq!(s.menu_bar_text(31 * MIN), None);
+        assert_eq!(labels(&s, 21 * MIN)[0], "💧 Drink water");
     }
 
     #[test]
-    fn menu_bar_text_none_when_all_off() {
-        let mut r = presets().remove(0);
-        r.enabled = false;
-        let s = scheduler(vec![r]);
-        assert_eq!(s.menu_bar_text(0), None);
+    fn menu_labels_for_off_and_outside_hours() {
+        let mut off = presets().remove(0);
+        off.enabled = false;
+        let mut night = presets().remove(1);
+        night.interval_minutes = 60; // due Monday 01:00, outside 08:00–20:00
+        let mut s = Scheduler::new(vec![off, night], MIN, 0);
+        s.local = test_local;
+        let labels: Vec<_> = s.menu_labels(0).into_iter().map(|(_, l)| l).collect();
+        assert_eq!(
+            labels,
+            ["💧 Drink water", "👀 Rest your eyes (outside active hours)"]
+        );
     }
 
     #[test]

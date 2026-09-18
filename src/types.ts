@@ -21,7 +21,6 @@ export type General = {
   popupSeconds: number;
   /** Epoch ms, or null when not paused. */
   pausedUntil: number | null;
-  showCountdown: boolean;
 };
 
 export type UpdateStatus =

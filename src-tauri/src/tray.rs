@@ -29,10 +29,17 @@ const TEST_POPUP_ID: &str = "test_popup";
 const SETTINGS_ID: &str = "settings";
 const QUIT_ID: &str = "quit";
 
-/// Status line at the top of the tray menu ("Next: 💧 Drink water in 12m").
+/// Menu items whose text changes every tick: the status line at the top
+/// ("Next: 💧 Drink water in 12m") and each reminder with its time left.
 /// Replaced whenever the menu is rebuilt.
 #[derive(Default)]
-struct TrayStatus(Mutex<Option<MenuItem<Wry>>>);
+struct LiveItems {
+    status: Option<MenuItem<Wry>>,
+    reminders: Vec<(String, CheckMenuItem<Wry>)>,
+}
+
+#[derive(Default)]
+struct TrayStatus(Mutex<LiveItems>);
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
     app.manage(TrayStatus::default());
@@ -81,7 +88,6 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
         false,
         None::<&str>,
     )?;
-    *app.state::<TrayStatus>().0.lock().unwrap() = Some(status.clone());
 
     let (reminders, paused) = {
         let state = app.state::<scheduler::SchedulerState>();
@@ -109,19 +115,30 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ],
         )?)
     };
+    let labels = scheduler::menu_labels(app);
     let toggles = reminders
         .iter()
-        .map(|r| {
+        .zip(&labels)
+        .map(|(r, (_, label))| {
             CheckMenuItem::with_id(
                 app,
                 format!("{TOGGLE_PREFIX}{}", r.id),
-                format!("{} {}", r.emoji, r.title),
+                label,
                 true,
                 r.enabled,
                 None::<&str>,
             )
         })
         .collect::<tauri::Result<Vec<_>>>()?;
+
+    *app.state::<TrayStatus>().0.lock().unwrap() = LiveItems {
+        status: Some(status.clone()),
+        reminders: reminders
+            .iter()
+            .map(|r| r.id.clone())
+            .zip(toggles.iter().cloned())
+            .collect(),
+    };
 
     let separator = || PredefinedMenuItem::separator(app);
     let (sep1, sep2, sep3) = (separator()?, separator()?, separator()?);
@@ -180,16 +197,20 @@ pub fn rebuild_menu(app: &AppHandle) {
     }
 }
 
-/// Updates the menu's status line, the tooltip, and the countdown beside the
-/// icon (macOS and Linux; Windows trays can't show text, so it gets the tooltip).
-pub fn set_status(app: &AppHandle, text: &str, title: Option<&str>) {
+/// Updates the status line, each reminder's time left, and the tooltip.
+pub fn set_status(app: &AppHandle, text: &str, labels: &[(String, String)]) {
     if let Some(state) = app.try_state::<TrayStatus>() {
-        if let Some(status) = state.0.lock().unwrap().as_ref() {
+        let live = state.0.lock().unwrap();
+        if let Some(status) = &live.status {
             let _ = status.set_text(text);
+        }
+        for (id, label) in labels {
+            if let Some((_, item)) = live.reminders.iter().find(|(item_id, _)| item_id == id) {
+                let _ = item.set_text(label);
+            }
         }
     }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
-        let _ = tray.set_title(title);
         let _ = tray.set_tooltip(Some(format!("Macy Health: {text}")));
     }
 }
