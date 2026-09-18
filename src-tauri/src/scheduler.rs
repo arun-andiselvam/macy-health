@@ -25,6 +25,7 @@ pub struct Reminder {
     pub message: String,
     pub interval_minutes: u64,
     pub enabled: bool,
+    pub sound: bool,
 }
 
 impl Reminder {
@@ -35,6 +36,7 @@ impl Reminder {
             emoji: self.emoji.clone(),
             title: self.title.clone(),
             message: self.message.clone(),
+            sound: self.sound,
         }
     }
 }
@@ -49,6 +51,7 @@ pub fn default_reminders() -> Vec<Reminder> {
         message: message.into(),
         interval_minutes,
         enabled: true,
+        sound: true,
     };
     vec![
         preset(

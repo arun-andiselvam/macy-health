@@ -26,6 +26,7 @@ pub struct PopupReminder {
     pub emoji: String,
     pub title: String,
     pub message: String,
+    pub sound: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -93,6 +94,9 @@ fn present(app: &AppHandle, reminder: &PopupReminder) {
     }
     let _ = window.show();
     let _ = app.emit_to(POPUP_LABEL, SHOW_EVENT, reminder);
+    if reminder.sound {
+        crate::sound::play(crate::sound::Sound::Chime);
+    }
 }
 
 /// Top-right of the work area (below the menu bar) on the monitor under the cursor.

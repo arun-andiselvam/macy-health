@@ -1,5 +1,6 @@
 mod popup;
 mod scheduler;
+mod sound;
 mod tray;
 
 use tauri::WindowEvent;
@@ -11,7 +12,8 @@ pub fn run() {
         .manage(popup::PopupState::default())
         .invoke_handler(tauri::generate_handler![
             popup::popup_current,
-            popup::popup_action
+            popup::popup_action,
+            sound::play_sound
         ])
         .setup(|app| {
             // Menu-bar only: no Dock icon, no app switcher entry.

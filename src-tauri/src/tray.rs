@@ -110,6 +110,7 @@ fn show_test_popup(app: &AppHandle) {
             emoji: emoji.into(),
             title: title.into(),
             message: message.into(),
+            sound: true,
         },
     );
 }
