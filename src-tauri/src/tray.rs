@@ -5,16 +5,23 @@ use std::sync::{
 
 use tauri::{
     image::Image,
-    menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem},
+    menu::{CheckMenuItem, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
     AppHandle, Manager, Wry,
 };
 
-use crate::{popup, scheduler};
+use crate::{
+    popup, scheduler,
+    settings::{self, PauseFor},
+};
 
 pub const TRAY_ID: &str = "main";
 
 const STATUS_ID: &str = "status";
+const PAUSE_30_ID: &str = "pause:30";
+const PAUSE_60_ID: &str = "pause:60";
+const PAUSE_TOMORROW_ID: &str = "pause:tomorrow";
+const RESUME_ID: &str = "resume";
 const TOGGLE_PREFIX: &str = "toggle:";
 const TEST_POPUP_ID: &str = "test_popup";
 const SETTINGS_ID: &str = "settings";
@@ -36,6 +43,10 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
         .menu(&menu)
         .show_menu_on_left_click(true)
         .on_menu_event(|app, event| match event.id().as_ref() {
+            PAUSE_30_ID => settings::pause(app, PauseFor::Minutes(30)),
+            PAUSE_60_ID => settings::pause(app, PauseFor::Minutes(60)),
+            PAUSE_TOMORROW_ID => settings::pause(app, PauseFor::UntilTomorrow),
+            RESUME_ID => settings::resume(app),
             TEST_POPUP_ID => show_test_popup(app),
             SETTINGS_ID => show_settings(app),
             QUIT_ID => app.exit(0),
@@ -60,11 +71,32 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     )?;
     *app.state::<TrayStatus>().0.lock().unwrap() = Some(status.clone());
 
-    let reminders = app
-        .state::<scheduler::SchedulerState>()
-        .lock()
-        .unwrap()
-        .reminders();
+    let (reminders, paused) = {
+        let state = app.state::<scheduler::SchedulerState>();
+        let scheduler = state.lock().unwrap();
+        (scheduler.reminders(), scheduler.paused_until().is_some())
+    };
+
+    let pause: Box<dyn IsMenuItem<Wry>> = if paused {
+        Box::new(MenuItem::with_id(
+            app,
+            RESUME_ID,
+            "Resume Reminders",
+            true,
+            None::<&str>,
+        )?)
+    } else {
+        Box::new(Submenu::with_items(
+            app,
+            "Pause Reminders",
+            true,
+            &[
+                &MenuItem::with_id(app, PAUSE_30_ID, "For 30 Minutes", true, None::<&str>)?,
+                &MenuItem::with_id(app, PAUSE_60_ID, "For 1 Hour", true, None::<&str>)?,
+                &MenuItem::with_id(app, PAUSE_TOMORROW_ID, "Until Tomorrow", true, None::<&str>)?,
+            ],
+        )?)
+    };
     let toggles = reminders
         .iter()
         .map(|r| {
@@ -85,7 +117,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, Some("CmdOrCtrl+,"))?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit Macy Health", true, Some("CmdOrCtrl+Q"))?;
 
-    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&status, &sep1];
+    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&status, pause.as_ref(), &sep1];
     items.extend(toggles.iter().map(|t| t as &dyn IsMenuItem<Wry>));
     items.extend([
         &sep2 as &dyn IsMenuItem<Wry>,
@@ -126,7 +158,7 @@ fn toggle_reminder(app: &AppHandle, id: &str) {
         .get(id)
         .map(|r| r.enabled);
     if let Some(enabled) = enabled {
-        if let Err(err) = crate::settings::set_enabled(app, id, !enabled) {
+        if let Err(err) = settings::set_enabled(app, id, !enabled) {
             eprintln!("tray: {err}");
         }
     }

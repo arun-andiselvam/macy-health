@@ -13,3 +13,12 @@ export type Reminder = {
   /** ISO weekdays, 1 = Monday … 7 = Sunday. */
   days: number[];
 };
+
+export type General = {
+  launchAtLogin: boolean;
+  /** 0 = off */
+  idlePauseMinutes: number;
+  popupSeconds: number;
+  /** Epoch ms, or null when not paused. */
+  pausedUntil: number | null;
+};

@@ -34,6 +34,10 @@ pub struct Scheduler {
     minute_ms: u64,
     /// Converts epoch ms to local weekday/time. Swappable for tests.
     local: fn(u64) -> LocalTime,
+    /// All reminders paused until this time (epoch ms).
+    paused_until: Option<u64>,
+    /// No keyboard/mouse input for a while; nothing fires until the user is back.
+    away: bool,
 }
 
 impl Scheduler {
@@ -42,6 +46,8 @@ impl Scheduler {
             entries: Vec::new(),
             minute_ms,
             local: local_time,
+            paused_until: None,
+            away: false,
         };
         for reminder in reminders {
             scheduler.upsert(reminder, now);
@@ -89,8 +95,56 @@ impl Scheduler {
         self.entries.retain(|e| e.reminder.id != id);
     }
 
+    pub fn paused_until(&self) -> Option<u64> {
+        self.paused_until
+    }
+
+    pub fn pause(&mut self, until: u64) {
+        self.paused_until = Some(until);
+    }
+
+    /// Ends a pause; every reminder starts a fresh interval.
+    pub fn resume(&mut self, now: u64) {
+        self.paused_until = None;
+        self.restart_all(now);
+    }
+
+    /// Resumes if the pause has run out. Returns true when it did.
+    pub fn expire_pause(&mut self, now: u64) -> bool {
+        match self.paused_until {
+            Some(until) if now >= until => {
+                self.resume(now);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Records whether the user is away. Coming back starts fresh intervals:
+    /// time away counts as a break. Returns true when the state changed.
+    pub fn set_away(&mut self, away: bool, now: u64) -> bool {
+        if away == self.away {
+            return false;
+        }
+        self.away = away;
+        if !away {
+            self.restart_all(now);
+        }
+        true
+    }
+
+    fn restart_all(&mut self, now: u64) {
+        for entry in &mut self.entries {
+            entry.showing = false;
+            entry.next_due = now + entry.reminder.interval_minutes * self.minute_ms;
+        }
+    }
+
     /// Returns the reminders that are due now and marks them as showing.
     pub fn tick(&mut self, now: u64) -> Vec<PopupReminder> {
+        if self.away || self.paused_until.is_some() {
+            return Vec::new();
+        }
         let (minute_ms, local) = (self.minute_ms, (self.local)(now));
         let mut due = Vec::new();
         for entry in &mut self.entries {
@@ -124,6 +178,12 @@ impl Scheduler {
     }
 
     pub fn status_text(&self, now: u64) -> String {
+        if self.away {
+            return "Paused while you're away".into();
+        }
+        if let Some(until) = self.paused_until {
+            return format!("Paused until {}", self.describe_until(until, now));
+        }
         let enabled = || self.entries.iter().filter(|e| e.reminder.enabled);
         let next = enabled()
             .filter(|e| !e.showing && e.reminder.is_active_at((self.local)(e.next_due)))
@@ -138,6 +198,18 @@ impl Scheduler {
             None if enabled().any(|e| e.showing) => "Reminder on screen".into(),
             None if enabled().next().is_some() => "Outside active hours".into(),
             None => "All reminders are off".into(),
+        }
+    }
+}
+
+impl Scheduler {
+    /// "14:30", or "tomorrow" for a pause that ends at midnight.
+    fn describe_until(&self, until: u64, now: u64) -> String {
+        let (end, today) = ((self.local)(until), (self.local)(now));
+        if end.minute == 0 && end.weekday != today.weekday {
+            "tomorrow".into()
+        } else {
+            format!("{:02}:{:02}", end.minute / 60, end.minute % 60)
         }
     }
 }
@@ -178,9 +250,22 @@ fn fast_mode() -> bool {
     cfg!(debug_assertions) && std::env::var("MACY_FAST").is_ok_and(|v| v == "1")
 }
 
-pub fn init(app: &AppHandle, reminders: Vec<Reminder>) {
+pub fn init(app: &AppHandle, reminders: Vec<Reminder>, paused_until: Option<u64>) {
     let minute_ms = if fast_mode() { 1_000 } else { 60_000 };
-    app.manage::<SchedulerState>(Mutex::new(Scheduler::new(reminders, minute_ms, now_ms())));
+    let mut scheduler = Scheduler::new(reminders, minute_ms, now_ms());
+    if let Some(until) = paused_until {
+        scheduler.pause(until);
+    }
+    app.manage::<SchedulerState>(Mutex::new(scheduler));
+}
+
+/// Epoch ms of the next local midnight.
+pub fn next_midnight_ms() -> u64 {
+    let tomorrow = Local::now().date_naive().succ_opt().unwrap_or_default();
+    tomorrow
+        .and_hms_opt(0, 0, 0)
+        .and_then(|t| Local.from_local_datetime(&t).earliest())
+        .map_or_else(|| now_ms() + 86_400_000, |t| t.timestamp_millis() as u64)
 }
 
 pub fn start_ticking(app: &AppHandle) {
@@ -198,7 +283,23 @@ pub fn start_ticking(app: &AppHandle) {
 
 fn run_tick(app: &AppHandle) {
     let now = now_ms();
-    let due = app.state::<SchedulerState>().lock().unwrap().tick(now);
+    let idle_limit_secs = crate::settings::general(app).idle_pause_minutes * 60;
+    let away = idle_limit_secs > 0 && crate::idle::idle_seconds() >= idle_limit_secs;
+
+    let (due, went_away, pause_ended) = {
+        let state = app.state::<SchedulerState>();
+        let mut scheduler = state.lock().unwrap();
+        let went_away = scheduler.set_away(away, now) && away;
+        let pause_ended = scheduler.expire_pause(now);
+        (scheduler.tick(now), went_away, pause_ended)
+    };
+
+    if went_away {
+        popup::dismiss_all(app);
+    }
+    if pause_ended {
+        crate::settings::pause_changed(app);
+    }
     for reminder in due {
         popup::enqueue(app, reminder);
     }
@@ -392,6 +493,49 @@ mod tests {
         let mut s = one(10);
         s.tick(10 * MIN);
         assert_eq!(s.status_text(10 * MIN), "Reminder on screen");
+    }
+
+    #[test]
+    fn pause_blocks_then_resume_restarts_intervals() {
+        let mut s = one(10);
+        s.pause(30 * MIN);
+        assert!(s.tick(10 * MIN).is_empty());
+        assert!(s.tick(20 * MIN).is_empty());
+        assert!(!s.expire_pause(29 * MIN));
+        assert!(s.expire_pause(30 * MIN));
+        assert!(s.paused_until().is_none());
+        assert!(s.tick(39 * MIN).is_empty(), "fresh interval after pause");
+        assert_eq!(s.tick(40 * MIN).len(), 1);
+    }
+
+    #[test]
+    fn manual_resume_restarts_and_clears_showing() {
+        let mut s = one(10);
+        s.tick(10 * MIN); // showing
+        s.pause(100 * MIN);
+        s.resume(15 * MIN);
+        assert_eq!(s.tick(25 * MIN).len(), 1);
+    }
+
+    #[test]
+    fn away_blocks_and_return_restarts() {
+        let mut s = one(10);
+        assert!(s.set_away(true, 5 * MIN));
+        assert!(!s.set_away(true, 6 * MIN), "no change");
+        assert!(s.tick(10 * MIN).is_empty());
+        assert_eq!(s.status_text(10 * MIN), "Paused while you're away");
+        assert!(s.set_away(false, 30 * MIN));
+        assert!(s.tick(39 * MIN).is_empty());
+        assert_eq!(s.tick(40 * MIN).len(), 1);
+    }
+
+    #[test]
+    fn pause_status_text() {
+        let mut s = one(10);
+        s.pause((14 * 60 + 30) * MIN);
+        assert_eq!(s.status_text(13 * 60 * MIN), "Paused until 14:30");
+        s.pause(24 * 60 * MIN); // Tuesday 00:00
+        assert_eq!(s.status_text(20 * 60 * MIN), "Paused until tomorrow");
     }
 
     #[test]

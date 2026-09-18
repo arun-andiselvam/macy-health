@@ -56,6 +56,7 @@ impl Reminder {
             title: self.title.clone(),
             message: self.message.clone(),
             sound: self.sound,
+            dismiss_after_seconds: 0,
         }
     }
 

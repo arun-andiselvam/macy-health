@@ -12,6 +12,7 @@ use tauri::{
 
 pub const POPUP_LABEL: &str = "popup";
 const SHOW_EVENT: &str = "reminder:show";
+const HIDE_EVENT: &str = "reminder:hide";
 
 // Logical px. Includes transparent padding around the card for its shadow.
 const WIDTH: f64 = 380.0;
@@ -27,6 +28,9 @@ pub struct PopupReminder {
     pub title: String,
     pub message: String,
     pub sound: bool,
+    /// Auto-dismiss delay; set from general settings when queued.
+    #[serde(default)]
+    pub dismiss_after_seconds: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -73,7 +77,8 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-pub fn enqueue(app: &AppHandle, reminder: PopupReminder) {
+pub fn enqueue(app: &AppHandle, mut reminder: PopupReminder) {
+    reminder.dismiss_after_seconds = crate::settings::general(app).popup_seconds;
     let state = app.state::<PopupState>();
     let mut queue = state.lock().unwrap();
     if queue.current.is_some() {
@@ -83,6 +88,20 @@ pub fn enqueue(app: &AppHandle, reminder: PopupReminder) {
     queue.current = Some(reminder.clone());
     drop(queue);
     present(app, &reminder);
+}
+
+/// Clears the queue and hides the popup (pause, or user went away).
+pub fn dismiss_all(app: &AppHandle) {
+    {
+        let state = app.state::<PopupState>();
+        let mut queue = state.lock().unwrap();
+        queue.current = None;
+        queue.pending.clear();
+    }
+    if let Some(window) = app.get_webview_window(POPUP_LABEL) {
+        let _ = window.hide();
+    }
+    let _ = app.emit_to(POPUP_LABEL, HIDE_EVENT, ());
 }
 
 fn present(app: &AppHandle, reminder: &PopupReminder) {

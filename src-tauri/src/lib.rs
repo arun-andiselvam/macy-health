@@ -1,3 +1,4 @@
+mod idle;
 mod popup;
 mod reminder;
 mod scheduler;
@@ -10,6 +11,14 @@ use tauri::WindowEvent;
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        // Must be first: a second launch just opens Settings in the running app.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            tray::show_settings(app);
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
         .plugin(tauri_plugin_opener::init())
         .manage(popup::PopupState::default())
         .invoke_handler(tauri::generate_handler![
@@ -21,6 +30,10 @@ pub fn run() {
             settings::delete_reminder,
             settings::set_reminder_enabled,
             settings::preview_reminder,
+            settings::get_general,
+            settings::save_general,
+            settings::pause_reminders,
+            settings::resume_reminders,
         ])
         .setup(|app| {
             // Menu-bar only: no Dock icon, no app switcher entry.
@@ -28,7 +41,9 @@ pub fn run() {
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
             let handle = app.handle();
-            scheduler::init(handle, settings::load(handle));
+            let (reminders, general) = settings::load(handle);
+            scheduler::init(handle, reminders, general.paused_until);
+            settings::init(handle, general);
             popup::create(handle)?;
             tray::create(handle)?;
             scheduler::start_ticking(handle);

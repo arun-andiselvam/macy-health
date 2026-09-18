@@ -10,11 +10,12 @@ type Reminder = {
   title: string;
   message: string;
   sound: boolean;
+  dismissAfterSeconds: number;
 };
 
 type Action = "done" | "snooze" | "skip" | "dismissed";
 
-const AUTO_DISMISS_MS = 30_000;
+const DEFAULT_DISMISS_SECONDS = 30;
 const EXIT_MS = 220;
 const EYE_REST_SECONDS = 20;
 const EYE_REST_CELEBRATE_MS = 1_600;
@@ -40,13 +41,22 @@ export default function Popup() {
     setVisible(true);
   }, []);
 
+  // Rust hid the popup without an action (reminders paused, or user away).
+  const reset = useCallback(() => {
+    currentId.current = null;
+    closing.current = true;
+    setVisible(false);
+  }, []);
+
   useEffect(() => {
-    const unlisten = listen<Reminder>("reminder:show", (e) => show(e.payload));
+    const unlistenShow = listen<Reminder>("reminder:show", (e) => show(e.payload));
+    const unlistenHide = listen("reminder:hide", reset);
     invoke<Reminder | null>("popup_current").then((r) => r && show(r));
     return () => {
-      unlisten.then((off) => off());
+      unlistenShow.then((off) => off());
+      unlistenHide.then((off) => off());
     };
-  }, [show]);
+  }, [show, reset]);
 
   const act = useCallback(
     (action: Action) => {
@@ -141,7 +151,7 @@ export default function Popup() {
           <div className="countdown" aria-hidden="true">
             <div
               className="countdown-bar"
-              style={{ animationDuration: `${AUTO_DISMISS_MS}ms` }}
+              style={{ animationDuration: `${reminder.dismissAfterSeconds || DEFAULT_DISMISS_SECONDS}s` }}
               onAnimationEnd={() => act("dismissed")}
             />
           </div>

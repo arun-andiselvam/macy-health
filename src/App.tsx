@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { Reminder } from "./types";
+import type { General, Reminder } from "./types";
 import { ReminderRow } from "./settings/ReminderRow";
 import { ReminderEditor } from "./settings/ReminderEditor";
+import { GeneralSettings, describePause } from "./settings/GeneralSettings";
 import "./App.css";
 
 const NEW_REMINDER: Reminder = {
@@ -28,16 +29,32 @@ function App() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [general, setGeneral] = useState<General | null>(null);
+  const [generalError, setGeneralError] = useState<string | null>(null);
 
   useEffect(() => {
     invoke<Reminder[]>("get_reminders")
       .then(setReminders)
       .catch((err) => setLoadError(errorText(err)));
-    const unlisten = listen<Reminder[]>("reminders:changed", (e) => setReminders(e.payload));
+    invoke<General>("get_general")
+      .then(setGeneral)
+      .catch((err) => setGeneralError(errorText(err)));
+    const unlistenReminders = listen<Reminder[]>("reminders:changed", (e) => setReminders(e.payload));
+    const unlistenGeneral = listen<General>("general:changed", (e) => setGeneral(e.payload));
     return () => {
-      unlisten.then((off) => off());
+      unlistenReminders.then((off) => off());
+      unlistenGeneral.then((off) => off());
     };
   }, []);
+
+  const runGeneral = async (command: string, args: Record<string, unknown> = {}) => {
+    setGeneralError(null);
+    try {
+      setGeneral(await invoke<General>(command, args));
+    } catch (err) {
+      setGeneralError(errorText(err));
+    }
+  };
 
   const edit = useCallback((reminder: Reminder | null) => {
     setDraft(reminder && { ...reminder, days: [...reminder.days] });
@@ -101,8 +118,10 @@ function App() {
       <header className="page-header">
         <div>
           <h1>Reminders</h1>
-          <p className="muted">
-            Each reminder pops up in the top-right corner of your screen, only during its active hours.
+          <p className="muted" role="status">
+            {general?.pausedUntil
+              ? `Paused until ${describePause(general.pausedUntil)}. Nothing will pop up until then.`
+              : "Each reminder pops up in the top-right corner of your screen, only during its active hours."}
           </p>
         </div>
         <button type="button" className="button primary" onClick={() => edit(NEW_REMINDER)} disabled={creating}>
@@ -116,7 +135,7 @@ function App() {
         </p>
       )}
 
-      <ul className="group">
+      <ul className={`group${general?.pausedUntil ? " is-paused" : ""}`}>
         {rows.map((reminder) => {
           const expanded = draft?.id === reminder.id;
           return (
@@ -146,6 +165,21 @@ function App() {
 
       {rows.length === 0 && !loadError && (
         <p className="empty muted">No reminders yet. Add one to get started.</p>
+      )}
+
+      <h2 className="section-title">General</h2>
+      {generalError && (
+        <p className="error" role="alert">
+          {generalError}
+        </p>
+      )}
+      {general && (
+        <GeneralSettings
+          general={general}
+          onChange={(next) => runGeneral("save_general", next)}
+          onPause={(minutes) => runGeneral("pause_reminders", { minutes })}
+          onResume={() => runGeneral("resume_reminders")}
+        />
       )}
     </main>
   );
