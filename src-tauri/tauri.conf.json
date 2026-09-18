@@ -47,6 +47,18 @@
       "signingIdentity": "Developer ID Application: HITASOFT TECHNOLOGY SOLUTIONS PRIVATE LIMITED (PQH88KC8RZ)",
       "hardenedRuntime": true,
       "minimumSystemVersion": "11.0"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU3MDUzQTMyNjJDRTJDNTgKUldSWUxNNWlNam9GNS9zSUlRN0tORENKRUFSSWxza2dSeis0TWRVNE1xTHZsZlBrdEFGZFNwTnYK",
+      "endpoints": [
+        "https://github.com/arun-andiselvam/macy-health/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

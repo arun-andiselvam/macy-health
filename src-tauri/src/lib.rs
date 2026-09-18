@@ -5,6 +5,7 @@ mod scheduler;
 mod settings;
 mod sound;
 mod tray;
+mod updater;
 
 use tauri::WindowEvent;
 
@@ -20,6 +21,8 @@ pub fn run() {
             None,
         ))
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updater::SharedUpdater::default())
         .manage(popup::PopupState::default())
         .invoke_handler(tauri::generate_handler![
             popup::popup_current,
@@ -34,6 +37,9 @@ pub fn run() {
             settings::save_general,
             settings::pause_reminders,
             settings::resume_reminders,
+            updater::get_update_info,
+            updater::check_for_updates,
+            updater::install_update,
         ])
         .setup(|app| {
             // Menu-bar only: no Dock icon, no app switcher entry.
@@ -47,6 +53,7 @@ pub fn run() {
             popup::create(handle)?;
             tray::create(handle)?;
             scheduler::start_ticking(handle);
+            updater::start_background_checks(handle);
             Ok(())
         })
         .on_window_event(|window, event| {

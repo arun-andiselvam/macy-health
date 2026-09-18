@@ -22,6 +22,8 @@ const PAUSE_30_ID: &str = "pause:30";
 const PAUSE_60_ID: &str = "pause:60";
 const PAUSE_TOMORROW_ID: &str = "pause:tomorrow";
 const RESUME_ID: &str = "resume";
+const INSTALL_UPDATE_ID: &str = "install_update";
+const CHECK_UPDATES_ID: &str = "check_updates";
 const TOGGLE_PREFIX: &str = "toggle:";
 const TEST_POPUP_ID: &str = "test_popup";
 const SETTINGS_ID: &str = "settings";
@@ -47,6 +49,16 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
             PAUSE_60_ID => settings::pause(app, PauseFor::Minutes(60)),
             PAUSE_TOMORROW_ID => settings::pause(app, PauseFor::UntilTomorrow),
             RESUME_ID => settings::resume(app),
+            INSTALL_UPDATE_ID => {
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move { crate::updater::install(&app).await });
+            }
+            CHECK_UPDATES_ID => {
+                // Results show in Settings → About.
+                show_settings(app);
+                let app = app.clone();
+                tauri::async_runtime::spawn(async move { crate::updater::check(&app, true).await });
+            }
             TEST_POPUP_ID => show_test_popup(app),
             SETTINGS_ID => show_settings(app),
             QUIT_ID => app.exit(0),
@@ -114,17 +126,44 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let separator = || PredefinedMenuItem::separator(app);
     let (sep1, sep2, sep3) = (separator()?, separator()?, separator()?);
     let test_popup = MenuItem::with_id(app, TEST_POPUP_ID, "Test Popup", true, None::<&str>)?;
+    let update = crate::updater::available_version(app)
+        .map(|v| {
+            MenuItem::with_id(
+                app,
+                INSTALL_UPDATE_ID,
+                format!("Update to v{v} and Restart"),
+                true,
+                None::<&str>,
+            )
+        })
+        .transpose()?;
+    let check_updates = MenuItem::with_id(
+        app,
+        CHECK_UPDATES_ID,
+        "Check for Updates…",
+        true,
+        None::<&str>,
+    )?;
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, Some("CmdOrCtrl+,"))?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit Macy Health", true, Some("CmdOrCtrl+Q"))?;
 
-    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&status, pause.as_ref(), &sep1];
+    let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&status];
+    if let Some(update) = &update {
+        items.push(update);
+    }
+    items.extend([pause.as_ref(), &sep1]);
     items.extend(toggles.iter().map(|t| t as &dyn IsMenuItem<Wry>));
     items.push(&sep2);
     // Settings has Preview for real use; this cycles every popup style while developing.
     if cfg!(debug_assertions) {
         items.push(&test_popup);
     }
-    items.extend([&settings as &dyn IsMenuItem<Wry>, &sep3, &quit]);
+    items.extend([
+        &settings as &dyn IsMenuItem<Wry>,
+        &check_updates,
+        &sep3,
+        &quit,
+    ]);
     Menu::with_items(app, &items)
 }
 

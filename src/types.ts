@@ -22,3 +22,16 @@ export type General = {
   /** Epoch ms, or null when not paused. */
   pausedUntil: number | null;
 };
+
+export type UpdateStatus =
+  | { state: "idle" }
+  | { state: "checking" }
+  | { state: "upToDate" }
+  | { state: "available"; version: string }
+  | { state: "installing" }
+  | { state: "failed"; message: string };
+
+export type UpdateInfo = {
+  currentVersion: string;
+  status: UpdateStatus;
+};

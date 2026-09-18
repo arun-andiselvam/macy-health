@@ -5,6 +5,7 @@ import type { General, Reminder } from "./types";
 import { ReminderRow } from "./settings/ReminderRow";
 import { ReminderEditor } from "./settings/ReminderEditor";
 import { GeneralSettings, describePause } from "./settings/GeneralSettings";
+import { AboutSection } from "./settings/AboutSection";
 import "./App.css";
 
 const NEW_REMINDER: Reminder = {
@@ -181,6 +182,9 @@ function App() {
           onResume={() => runGeneral("resume_reminders")}
         />
       )}
+
+      <h2 className="section-title">About</h2>
+      <AboutSection />
     </main>
   );
 }
