@@ -20,6 +20,14 @@ const SNOOZE_MINUTES: u64 = 5;
 /// restart its interval instead of firing a stale reminder.
 const STALE_AFTER_MINUTES: u64 = 2;
 
+/// One reminder's line in the tray menu.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MenuRow {
+    pub id: String,
+    pub name: String,
+    pub time_left: Option<String>,
+}
+
 #[derive(Debug)]
 struct Entry {
     reminder: Reminder,
@@ -186,11 +194,11 @@ impl Scheduler {
         }
         let enabled = || self.entries.iter().filter(|e| e.reminder.enabled);
         match self.next_up() {
-            Some(e) => format!(
+            Some((e, due)) => format!(
                 "Next: {} {} {}",
                 e.reminder.emoji,
                 e.reminder.title,
-                format_remaining(e.next_due.saturating_sub(now), self.minute_ms)
+                format_remaining(due.saturating_sub(now), self.minute_ms)
             ),
             None if enabled().any(|e| e.showing) => "Reminder on screen".into(),
             None if enabled().next().is_some() => "Outside active hours".into(),
@@ -200,39 +208,54 @@ impl Scheduler {
 }
 
 impl Scheduler {
-    /// Tray menu label per reminder: "💧 Drink water (in 12m)". No time is
-    /// shown while paused, away, or for reminders that are off.
-    pub fn menu_labels(&self, now: u64) -> Vec<(String, String)> {
+    /// Tray menu rows: (id, "💧 Drink water", time until it next fires).
+    /// No time while paused or away, or for reminders that are off.
+    pub fn menu_rows(&self, now: u64) -> Vec<MenuRow> {
         let quiet = self.away || self.paused_until.is_some();
         self.entries
             .iter()
             .map(|e| {
                 let r = &e.reminder;
-                let name = format!("{} {}", r.emoji, r.title);
-                let when = if !r.enabled || quiet {
+                let time_left = if !r.enabled || quiet {
                     None
                 } else if e.showing {
-                    Some("on screen".to_string())
-                } else if !r.is_active_at((self.local)(e.next_due)) {
-                    Some("outside active hours".to_string())
+                    Some("now".to_string())
                 } else {
-                    Some(format_remaining(
-                        e.next_due.saturating_sub(now),
-                        self.minute_ms,
-                    ))
+                    self.projected_due(e)
+                        .map(|due| short_remaining(due.saturating_sub(now), self.minute_ms))
                 };
-                let label = when.map_or(name.clone(), |w| format!("{name} ({w})"));
-                (r.id.clone(), label)
+                MenuRow {
+                    id: r.id.clone(),
+                    name: format!("{} {}", r.emoji, r.title),
+                    time_left,
+                }
             })
             .collect()
     }
 
-    fn next_up(&self) -> Option<&Entry> {
+    /// When a reminder will actually pop up next: its next due time, rolled
+    /// forward by its interval past any stretch outside its active hours
+    /// (mirroring `tick`). None if that doesn't happen within a week.
+    fn projected_due(&self, entry: &Entry) -> Option<u64> {
+        const WEEK_MINUTES: u64 = 7 * 24 * 60;
+        let step = entry.reminder.interval_minutes.max(1) * self.minute_ms;
+        let limit = entry.next_due + WEEK_MINUTES * self.minute_ms;
+        let mut due = entry.next_due;
+        while due <= limit {
+            if entry.reminder.is_active_at((self.local)(due)) {
+                return Some(due);
+            }
+            due += step;
+        }
+        None
+    }
+
+    fn next_up(&self) -> Option<(&Entry, u64)> {
         self.entries
             .iter()
             .filter(|e| e.reminder.enabled && !e.showing)
-            .filter(|e| e.reminder.is_active_at((self.local)(e.next_due)))
-            .min_by_key(|e| e.next_due)
+            .filter_map(|e| self.projected_due(e).map(|due| (e, due)))
+            .min_by_key(|(_, due)| *due)
     }
 
     /// "14:30", or "tomorrow" for a pause that ends at midnight.
@@ -354,20 +377,13 @@ pub fn status_text(app: &AppHandle) -> String {
 }
 
 pub fn refresh_status(app: &AppHandle) {
-    let (status, labels) = {
+    let (status, rows) = {
         let state = app.state::<SchedulerState>();
         let scheduler = state.lock().unwrap();
         let now = now_ms();
-        (scheduler.status_text(now), scheduler.menu_labels(now))
+        (scheduler.status_text(now), scheduler.menu_rows(now))
     };
-    crate::tray::set_status(app, &status, &labels);
-}
-
-pub fn menu_labels(app: &AppHandle) -> Vec<(String, String)> {
-    app.state::<SchedulerState>()
-        .lock()
-        .unwrap()
-        .menu_labels(now_ms())
+    crate::tray::set_status(app, &status, &rows);
 }
 
 pub fn handle_action(app: &AppHandle, id: &str, action: PopupAction) {
@@ -480,7 +496,7 @@ mod tests {
         // Monday 01:00: due but outside hours → skipped, next at 02:00.
         assert!(s.tick(60 * MIN).is_empty());
         assert!(s.tick(90 * MIN).is_empty());
-        assert_eq!(s.status_text(90 * MIN), "Outside active hours");
+        assert_eq!(s.status_text(90 * MIN), "Next: 💧 Drink water in 6h 30m");
         // Keeps rolling hourly until 08:00, then fires.
         for h in 2..8 {
             assert!(s.tick(h * 60 * MIN).is_empty());
@@ -591,42 +607,36 @@ mod tests {
         assert_eq!(s.status_text(20 * 60 * MIN), "Paused until tomorrow");
     }
 
-    #[test]
-    fn menu_labels_show_time_left_per_reminder() {
-        let mut s = scheduler(presets());
-        let labels = |s: &Scheduler, t| {
-            s.menu_labels(t)
-                .into_iter()
-                .map(|(_, l)| l)
-                .collect::<Vec<_>>()
-        };
-        assert_eq!(
-            labels(&s, 8 * MIN),
-            [
-                "💧 Drink water (in 37m)",
-                "👀 Rest your eyes (in 12m)",
-                "🧍 Stand up (in 52m)"
-            ]
-        );
-        s.tick(20 * MIN);
-        assert_eq!(labels(&s, 20 * MIN)[1], "👀 Rest your eyes (on screen)");
-        s.pause(100 * MIN);
-        assert_eq!(labels(&s, 21 * MIN)[0], "💧 Drink water");
+    fn times(s: &Scheduler, now: u64) -> Vec<Option<String>> {
+        s.menu_rows(now).into_iter().map(|r| r.time_left).collect()
     }
 
     #[test]
-    fn menu_labels_for_off_and_outside_hours() {
+    fn menu_rows_show_time_left_per_reminder() {
+        let mut s = scheduler(presets());
+        let rows = s.menu_rows(8 * MIN);
+        assert_eq!(rows[0].name, "💧 Drink water");
+        assert_eq!(
+            times(&s, 8 * MIN),
+            [Some("37m".into()), Some("12m".into()), Some("52m".into())]
+        );
+        s.tick(20 * MIN);
+        assert_eq!(times(&s, 20 * MIN)[1].as_deref(), Some("now"));
+        s.pause(100 * MIN);
+        assert_eq!(times(&s, 21 * MIN), [None, None, None]);
+    }
+
+    #[test]
+    fn menu_rows_project_past_inactive_hours() {
         let mut off = presets().remove(0);
         off.enabled = false;
-        let mut night = presets().remove(1);
-        night.interval_minutes = 60; // due Monday 01:00, outside 08:00–20:00
-        let mut s = Scheduler::new(vec![off, night], MIN, 0);
+        let mut eyes = presets().remove(1); // 08:00–20:00
+        eyes.interval_minutes = 60; // first due Monday 01:00, outside hours
+        let mut s = Scheduler::new(vec![off, eyes], MIN, 0);
         s.local = test_local;
-        let labels: Vec<_> = s.menu_labels(0).into_iter().map(|(_, l)| l).collect();
-        assert_eq!(
-            labels,
-            ["💧 Drink water", "👀 Rest your eyes (outside active hours)"]
-        );
+        // Rolls hourly to 08:00: 8h from midnight.
+        assert_eq!(times(&s, 0), [None, Some("8h".into())]);
+        assert_eq!(s.status_text(0), "Next: 👀 Rest your eyes in 8h");
     }
 
     #[test]

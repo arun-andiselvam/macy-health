@@ -11,7 +11,8 @@ use tauri::{
 };
 
 use crate::{
-    popup, scheduler,
+    popup,
+    scheduler::{self, MenuRow},
     settings::{self, PauseFor},
 };
 
@@ -35,6 +36,8 @@ const QUIT_ID: &str = "quit";
 #[derive(Default)]
 struct LiveItems {
     status: Option<MenuItem<Wry>>,
+    // Updated by text on Windows/Linux; macOS styles the native items instead.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     reminders: Vec<(String, CheckMenuItem<Wry>)>,
 }
 
@@ -115,15 +118,13 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             ],
         )?)
     };
-    let labels = scheduler::menu_labels(app);
     let toggles = reminders
         .iter()
-        .zip(&labels)
-        .map(|(r, (_, label))| {
+        .map(|r| {
             CheckMenuItem::with_id(
                 app,
                 format!("{TOGGLE_PREFIX}{}", r.id),
-                label,
+                format!("{} {}", r.emoji, r.title),
                 true,
                 r.enabled,
                 None::<&str>,
@@ -192,26 +193,55 @@ pub fn rebuild_menu(app: &AppHandle) {
     match build_menu(app) {
         Ok(menu) => {
             let _ = tray.set_menu(Some(menu));
+            // Fill in the time-left text on the fresh items.
+            scheduler::refresh_status(app);
         }
         Err(err) => eprintln!("tray: failed to rebuild menu: {err}"),
     }
 }
 
 /// Updates the status line, each reminder's time left, and the tooltip.
-pub fn set_status(app: &AppHandle, text: &str, labels: &[(String, String)]) {
+pub fn set_status(app: &AppHandle, text: &str, rows: &[MenuRow]) {
     if let Some(state) = app.try_state::<TrayStatus>() {
         let live = state.0.lock().unwrap();
         if let Some(status) = &live.status {
             let _ = status.set_text(text);
         }
-        for (id, label) in labels {
-            if let Some((_, item)) = live.reminders.iter().find(|(item_id, _)| item_id == id) {
-                let _ = item.set_text(label);
+        // macOS styles the native items directly (right-aligned column below).
+        #[cfg(not(target_os = "macos"))]
+        for row in rows {
+            if let Some((_, item)) = live.reminders.iter().find(|(id, _)| *id == row.id) {
+                let _ = item.set_text(plain_label(row));
             }
         }
     }
     if let Some(tray) = app.tray_by_id(TRAY_ID) {
         let _ = tray.set_tooltip(Some(format!("Macy Health: {text}")));
+        #[cfg(target_os = "macos")]
+        {
+            let rows: Vec<_> = rows
+                .iter()
+                .map(|r| (r.name.clone(), r.time_left.clone()))
+                .collect();
+            let _ = tray.with_inner_tray_icon(move |inner| {
+                let Some(mtm) = objc2::MainThreadMarker::new() else {
+                    return;
+                };
+                if let Some(menu) = inner.ns_status_item().and_then(|item| item.menu(mtm)) {
+                    crate::menu_style::apply(&menu, &rows);
+                }
+            });
+        }
+    }
+}
+
+/// Windows right-aligns text after a tab in menus; other platforms get spacing.
+#[cfg(not(target_os = "macos"))]
+fn plain_label(row: &MenuRow) -> String {
+    match &row.time_left {
+        Some(time) if cfg!(windows) => format!("{}\t{time}", row.name),
+        Some(time) => format!("{}    {time}", row.name),
+        None => row.name.clone(),
     }
 }
 

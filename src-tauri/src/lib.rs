@@ -1,4 +1,6 @@
 mod idle;
+#[cfg(target_os = "macos")]
+mod menu_style;
 mod popup;
 mod reminder;
 mod scheduler;
