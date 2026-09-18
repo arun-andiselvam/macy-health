@@ -1,21 +1,26 @@
-// Animated illustrations for each reminder kind. All motion lives in popup.css.
+// Illustrations for each reminder kind. All motion lives in illustrations.css.
+import "./illustrations.css";
 
 type Props = {
   kind: string;
   emoji: string;
-  countdownMs: number;
+  /** Eye-rest countdown ring length. */
+  countdownMs?: number;
+  /** Static pose, for lists. */
+  still?: boolean;
 };
 
-export function Illustration({ kind, emoji, countdownMs }: Props) {
+export function Illustration({ kind, emoji, countdownMs = 20_000, still = false }: Props) {
+  const variant = still ? " art-still" : "";
   switch (kind) {
     case "water":
-      return <WaterGlass />;
+      return <WaterGlass variant={variant} />;
     case "eyes":
-      return <RestingEye countdownMs={countdownMs} />;
+      return <RestingEye variant={variant} countdownMs={countdownMs} />;
     case "stand":
-      return <StandingFigure />;
+      return <StandingFigure variant={variant} />;
     default:
-      return <span className="emoji">{emoji}</span>;
+      return <span className={`emoji${still ? " emoji-still" : ""}`}>{emoji}</span>;
   }
 }
 
@@ -30,9 +35,9 @@ const WAVE = (() => {
   return `${d} V64 H-16 Z`;
 })();
 
-function WaterGlass() {
+function WaterGlass({ variant }: { variant: string }) {
   return (
-    <svg className="art art-water" viewBox="0 0 64 64" aria-hidden="true">
+    <svg className={`art art-water${variant}`} viewBox="0 0 64 64" aria-hidden="true">
       <defs>
         <clipPath id="glass-clip">
           <path d={GLASS} />
@@ -57,9 +62,9 @@ function WaterGlass() {
 
 const EYE = "M12 32 Q32 14 52 32 Q32 50 12 32 Z";
 
-function RestingEye({ countdownMs }: { countdownMs: number }) {
+function RestingEye({ variant, countdownMs }: { variant: string; countdownMs: number }) {
   return (
-    <svg className="art art-eyes" viewBox="0 0 64 64" aria-hidden="true">
+    <svg className={`art art-eyes${variant}`} viewBox="0 0 64 64" aria-hidden="true">
       <circle className="ring-track" cx="32" cy="32" r="29" />
       <circle
         className="ring"
@@ -92,9 +97,9 @@ function RestingEye({ countdownMs }: { countdownMs: number }) {
 
 // ---------- stand: figure raises arms and stretches ----------
 
-function StandingFigure() {
+function StandingFigure({ variant }: { variant: string }) {
   return (
-    <svg className="art art-stand" viewBox="0 0 64 64" aria-hidden="true">
+    <svg className={`art art-stand${variant}`} viewBox="0 0 64 64" aria-hidden="true">
       <g className="sparkles">
         <path d="M18 12 L14 9" />
         <path d="M46 12 L50 9" />

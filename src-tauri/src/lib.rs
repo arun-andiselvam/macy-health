@@ -1,5 +1,7 @@
 mod popup;
+mod reminder;
 mod scheduler;
+mod settings;
 mod sound;
 mod tray;
 
@@ -13,16 +15,23 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             popup::popup_current,
             popup::popup_action,
-            sound::play_sound
+            sound::play_sound,
+            settings::get_reminders,
+            settings::save_reminder,
+            settings::delete_reminder,
+            settings::set_reminder_enabled,
+            settings::preview_reminder,
         ])
         .setup(|app| {
             // Menu-bar only: no Dock icon, no app switcher entry.
             #[cfg(target_os = "macos")]
             app.set_activation_policy(tauri::ActivationPolicy::Accessory);
 
-            popup::create(app.handle())?;
-            tray::create(app.handle())?;
-            scheduler::start(app.handle());
+            let handle = app.handle();
+            scheduler::init(handle, settings::load(handle));
+            popup::create(handle)?;
+            tray::create(handle)?;
+            scheduler::start_ticking(handle);
             Ok(())
         })
         .on_window_event(|window, event| {

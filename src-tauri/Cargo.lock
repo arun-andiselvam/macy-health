@@ -2147,6 +2147,7 @@ dependencies = [
 name = "macy-health"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "objc2-app-kit",
  "rodio",
  "serde",

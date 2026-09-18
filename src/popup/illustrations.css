@@ -1,0 +1,222 @@
+/* Illustrations shared by the popup and Settings. Each reminder kind sets
+   its accent via [data-kind] on an ancestor. */
+
+:root {
+  --eye-white: #ffffff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --eye-white: #e9edf2;
+  }
+}
+
+[data-kind] {
+  --accent: #5e5ce6;
+  --accent-soft: rgba(94, 92, 230, 0.15);
+}
+[data-kind="water"] { --accent: #0a84ff; --accent-soft: rgba(10, 132, 255, 0.14); }
+[data-kind="eyes"]  { --accent: #30b0c7; --accent-soft: rgba(48, 176, 199, 0.16); }
+[data-kind="stand"] { --accent: #34c759; --accent-soft: rgba(52, 199, 89, 0.16); }
+
+.emoji {
+  font-size: 34px;
+  line-height: 1;
+  display: inline-block;
+  animation: bounce 1.6s 700ms ease-in-out infinite;
+}
+
+.art {
+  width: 64px;
+  height: 64px;
+  overflow: visible;
+}
+
+/* SVG transforms use view-box coordinates (0–64). */
+.art * {
+  transform-box: view-box;
+}
+
+@keyframes bounce {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
+}
+
+/* water */
+
+.art-water .glass {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.6;
+  stroke-linejoin: round;
+}
+.art-water .water-front { fill: var(--accent); opacity: 0.85; }
+.art-water .water-back  { fill: var(--accent); opacity: 0.35; }
+.art-water .bubble      { fill: #fff; opacity: 0; }
+.art-water .drop        { fill: var(--accent); opacity: 0; }
+
+.art-water .water-level {
+  transform: translateY(60px);
+  animation: fill-glass 1.8s 650ms cubic-bezier(0.25, 0.8, 0.3, 1) forwards;
+}
+.art-water .water-front { animation: wave-left 1.4s linear infinite; }
+.art-water .water-back  { animation: wave-right 2.1s linear infinite; }
+.art-water .drop        { animation: drop-fall 2.4s 150ms ease-in infinite; }
+.art-water .bubble.b1   { animation: bubble 2.2s 1.6s ease-out infinite; }
+.art-water .bubble.b2   { animation: bubble 2.6s 2.2s ease-out infinite; }
+.art-water .bubble.b3   { animation: bubble 2.4s 2.9s ease-out infinite; }
+
+@keyframes fill-glass {
+  from { transform: translateY(60px); }
+  to   { transform: translateY(27px); }
+}
+@keyframes wave-left {
+  from { transform: translateX(0); }
+  to   { transform: translateX(-16px); }
+}
+@keyframes wave-right {
+  from { transform: translateX(-24px); }
+  to   { transform: translateX(-8px); }
+}
+@keyframes drop-fall {
+  0%   { transform: translateY(-2px); opacity: 0; }
+  10%  { opacity: 1; }
+  35%  { transform: translateY(19px); opacity: 1; }
+  40%  { transform: translateY(20px); opacity: 0; }
+  100% { transform: translateY(20px); opacity: 0; }
+}
+@keyframes bubble {
+  0%   { transform: translateY(0);     opacity: 0; }
+  20%  { opacity: 0.8; }
+  100% { transform: translateY(-17px); opacity: 0; }
+}
+
+/* eyes */
+
+.art-eyes .ring-track {
+  fill: none;
+  stroke: var(--accent);
+  stroke-opacity: 0.18;
+  stroke-width: 3;
+}
+.art-eyes .ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation-name: ring-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+.art-eyes .eye-white   { fill: var(--eye-white); }
+.art-eyes .eye-outline { fill: none; stroke: var(--accent); stroke-width: 2.4; stroke-linejoin: round; }
+.art-eyes .iris-color  { fill: var(--accent); }
+.art-eyes .pupil       { fill: #111; }
+.art-eyes .glint       { fill: #fff; }
+
+.art-eyes .eye {
+  transform-origin: 32px 32px;
+  animation: blink 3.4s 1.2s ease-in-out infinite;
+}
+.art-eyes .iris {
+  animation: look-far 6s 600ms ease-in-out infinite;
+}
+.card.is-complete .art-eyes .iris {
+  animation: none;
+}
+.card.is-complete .art-eyes .eye {
+  animation: happy 600ms ease-out both;
+}
+
+@keyframes ring-fill {
+  from { stroke-dashoffset: 100; }
+  to   { stroke-dashoffset: 0; }
+}
+@keyframes blink {
+  0%, 46%, 54%, 100% { transform: scaleY(1); }
+  50%                { transform: scaleY(0.08); }
+}
+@keyframes look-far {
+  0%, 100% { transform: translate(0, 0); }
+  20%, 40% { transform: translate(-6px, -1px); }
+  60%, 80% { transform: translate(6px, -1px); }
+}
+@keyframes happy {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.15); }
+  100% { transform: scale(1); }
+}
+
+/* stand */
+
+.art-stand .limb {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 3.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.art-stand .head { fill: var(--accent); }
+.art-stand .ground {
+  stroke: var(--accent);
+  stroke-opacity: 0.35;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+}
+.art-stand .sparkles path {
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+
+.art-stand .figure {
+  transform-origin: 32px 56px;
+  animation: stretch-body 2.6s 400ms ease-in-out infinite;
+}
+.art-stand .arm { transform-origin: 32px 24px; }
+.art-stand .arm-left  { transform: rotate(28deg);  animation: arm-left 2.6s 400ms ease-in-out infinite; }
+.art-stand .arm-right { transform: rotate(-28deg); animation: arm-right 2.6s 400ms ease-in-out infinite; }
+.art-stand .sparkles {
+  opacity: 0;
+  animation: sparkle 2.6s 400ms ease-in-out infinite;
+}
+
+@keyframes stretch-body {
+  0%, 100% { transform: translateY(1.5px) scaleY(0.96); }
+  35%, 65% { transform: translateY(-1px) scaleY(1.03); }
+}
+@keyframes arm-left {
+  0%, 100% { transform: rotate(28deg); }
+  35%, 65% { transform: rotate(140deg); }
+}
+@keyframes arm-right {
+  0%, 100% { transform: rotate(-28deg); }
+  35%, 65% { transform: rotate(-140deg); }
+}
+@keyframes sparkle {
+  0%, 30%, 70%, 100% { opacity: 0; }
+  45%, 55%           { opacity: 1; }
+}
+
+/* Still pose for lists: filled glass, open eye, arms down, no ring. */
+.art-still * {
+  animation: none !important;
+}
+.art-still.art-water .water-level { transform: translateY(27px); }
+.art-still.art-eyes .ring,
+.art-still.art-eyes .ring-track { display: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  /* Keep the countdown ring (it carries information); settle everything else. */
+  .emoji,
+  .art *:not(.ring) {
+    animation-duration: 1ms !important;
+    animation-delay: 0ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
+
+.emoji-still {
+  animation: none;
+}
