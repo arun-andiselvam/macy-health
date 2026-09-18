@@ -10,12 +10,16 @@ use tauri::{
 pub const TRAY_ID: &str = "main";
 pub const STATUS_ITEM_ID: &str = "status";
 
+/// Status line at the top of the tray menu ("Next: 💧 Drink water in 12m").
+struct TrayStatus(MenuItem<Wry>);
+
 const TEST_POPUP_ID: &str = "test_popup";
 const SETTINGS_ID: &str = "settings";
 const QUIT_ID: &str = "quit";
 
 pub fn create(app: &AppHandle) -> tauri::Result<()> {
-    let menu = build_menu(app)?;
+    let (menu, status) = build_menu(app)?;
+    app.manage(TrayStatus(status));
 
     TrayIconBuilder::with_id(TRAY_ID)
         .icon(Image::from_bytes(include_bytes!("../icons/tray.png"))?)
@@ -34,8 +38,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
-    // Status line is updated by the scheduler (Phase 3).
+fn build_menu(app: &AppHandle) -> tauri::Result<(Menu<Wry>, MenuItem<Wry>)> {
     let status = MenuItem::with_id(
         app,
         STATUS_ITEM_ID,
@@ -47,7 +50,7 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
     let settings = MenuItem::with_id(app, SETTINGS_ID, "Settings…", true, Some("CmdOrCtrl+,"))?;
     let quit = MenuItem::with_id(app, QUIT_ID, "Quit Macy Health", true, Some("CmdOrCtrl+Q"))?;
 
-    Menu::with_items(
+    let menu = Menu::with_items(
         app,
         &[
             &status,
@@ -57,7 +60,14 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
             &PredefinedMenuItem::separator(app)?,
             &quit,
         ],
-    )
+    )?;
+    Ok((menu, status))
+}
+
+pub fn set_status(app: &AppHandle, text: &str) {
+    if let Some(status) = app.try_state::<TrayStatus>() {
+        let _ = status.0.set_text(text);
+    }
 }
 
 pub fn show_settings(app: &AppHandle) {

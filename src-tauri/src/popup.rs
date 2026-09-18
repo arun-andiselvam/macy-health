@@ -28,7 +28,7 @@ pub struct PopupReminder {
     pub message: String,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum PopupAction {
     Done,
@@ -131,11 +131,11 @@ pub fn popup_action(app: AppHandle, state: State<PopupState>, id: String, action
         if queue.current.as_ref().map(|r| r.id.as_str()) != Some(id.as_str()) {
             return; // stale action from an already-replaced popup
         }
-        // Phase 3: hand `action` to the scheduler (reschedule / snooze).
-        println!("popup: {id} -> {action:?}");
         queue.current = queue.pending.pop_front();
         queue.current.clone()
     };
+
+    crate::scheduler::handle_action(&app, &id, action);
 
     match next {
         Some(reminder) => present(&app, &reminder),

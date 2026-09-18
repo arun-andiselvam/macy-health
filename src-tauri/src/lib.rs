@@ -1,4 +1,5 @@
 mod popup;
+mod scheduler;
 mod tray;
 
 use tauri::WindowEvent;
@@ -19,6 +20,7 @@ pub fn run() {
 
             popup::create(app.handle())?;
             tray::create(app.handle())?;
+            scheduler::start(app.handle());
             Ok(())
         })
         .on_window_event(|window, event| {
