@@ -119,13 +119,12 @@ fn build_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
 
     let mut items: Vec<&dyn IsMenuItem<Wry>> = vec![&status, pause.as_ref(), &sep1];
     items.extend(toggles.iter().map(|t| t as &dyn IsMenuItem<Wry>));
-    items.extend([
-        &sep2 as &dyn IsMenuItem<Wry>,
-        &test_popup,
-        &settings,
-        &sep3,
-        &quit,
-    ]);
+    items.push(&sep2);
+    // Settings has Preview for real use; this cycles every popup style while developing.
+    if cfg!(debug_assertions) {
+        items.push(&test_popup);
+    }
+    items.extend([&settings as &dyn IsMenuItem<Wry>, &sep3, &quit]);
     Menu::with_items(app, &items)
 }
 
