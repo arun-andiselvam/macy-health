@@ -2,7 +2,10 @@
 //! `Instant`, which stops advancing while a Mac is asleep.
 
 use std::{
-    sync::Mutex,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex,
+    },
     thread,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -44,8 +47,8 @@ pub struct Scheduler {
     local: fn(u64) -> LocalTime,
     /// All reminders paused until this time (epoch ms).
     paused_until: Option<u64>,
-    /// No keyboard/mouse input for a while; nothing fires until the user is back.
-    away: bool,
+    /// Since when the user has been away (epoch ms); nothing fires meanwhile.
+    away_since: Option<u64>,
 }
 
 impl Scheduler {
@@ -55,7 +58,7 @@ impl Scheduler {
             minute_ms,
             local: local_time,
             paused_until: None,
-            away: false,
+            away_since: None,
         };
         for reminder in reminders {
             scheduler.upsert(reminder, now);
@@ -128,17 +131,36 @@ impl Scheduler {
         }
     }
 
-    /// Records whether the user is away. Coming back starts fresh intervals:
-    /// time away counts as a break. Returns true when the state changed.
+    pub fn is_away(&self) -> bool {
+        self.away_since.is_some()
+    }
+
+    /// Records whether the user is away. Returns true when the state changed.
     pub fn set_away(&mut self, away: bool, now: u64) -> bool {
-        if away == self.away {
-            return false;
-        }
-        self.away = away;
-        if !away {
-            self.restart_all(now);
+        match (away, self.away_since) {
+            (true, None) => self.away_since = Some(now),
+            (false, Some(since)) => {
+                self.away_since = None;
+                self.return_from_break(since, now);
+            }
+            _ => return false,
         }
         true
+    }
+
+    /// After time away (idle, locked, or the Mac asleep): eye and stand-up
+    /// reminders start a fresh interval; the rest resume where they paused.
+    /// Popups closed while away come back if they're still due.
+    pub fn return_from_break(&mut self, since: u64, now: u64) {
+        let away_for = now.saturating_sub(since);
+        for entry in &mut self.entries {
+            entry.showing = false;
+            if entry.reminder.restarts_after_break() {
+                entry.next_due = now + entry.reminder.interval_minutes * self.minute_ms;
+            } else {
+                entry.next_due = entry.next_due.saturating_add(away_for).max(now);
+            }
+        }
     }
 
     fn restart_all(&mut self, now: u64) {
@@ -150,7 +172,7 @@ impl Scheduler {
 
     /// Returns the reminders that are due now and marks them as showing.
     pub fn tick(&mut self, now: u64) -> Vec<PopupReminder> {
-        if self.away || self.paused_until.is_some() {
+        if self.away_since.is_some() || self.paused_until.is_some() {
             return Vec::new();
         }
         let (minute_ms, local) = (self.minute_ms, (self.local)(now));
@@ -186,7 +208,7 @@ impl Scheduler {
     }
 
     pub fn status_text(&self, now: u64) -> String {
-        if self.away {
+        if self.away_since.is_some() {
             return "Paused while you're away".into();
         }
         if let Some(until) = self.paused_until {
@@ -211,7 +233,7 @@ impl Scheduler {
     /// Tray menu rows: (id, "💧 Drink water", time until it next fires).
     /// No time while paused or away, or for reminders that are off.
     pub fn menu_rows(&self, now: u64) -> Vec<MenuRow> {
-        let quiet = self.away || self.paused_until.is_some();
+        let quiet = self.away_since.is_some() || self.paused_until.is_some();
         self.entries
             .iter()
             .map(|e| {
@@ -344,14 +366,25 @@ pub fn start_ticking(app: &AppHandle) {
     });
 }
 
+/// A gap this long between ticks means the Mac was asleep.
+const SLEEP_GAP_MS: u64 = 2 * 60_000;
+
 fn run_tick(app: &AppHandle) {
+    static LAST_TICK: AtomicU64 = AtomicU64::new(0);
     let now = now_ms();
+    let last = LAST_TICK.swap(now, Ordering::Relaxed);
     let idle_limit_secs = crate::settings::general(app).idle_pause_minutes * 60;
-    let away = idle_limit_secs > 0 && crate::idle::idle_seconds() >= idle_limit_secs;
+    let away = crate::idle::presence().is_away(idle_limit_secs);
 
     let (due, went_away, pause_ended) = {
         let state = app.state::<SchedulerState>();
         let mut scheduler = state.lock().unwrap();
+        // Sleep counts as time away, with the same rules as walking off.
+        // (Already away: coming back will cover the sleep too.)
+        let slept = last > 0 && now.saturating_sub(last) > SLEEP_GAP_MS;
+        if slept && idle_limit_secs > 0 && !scheduler.is_away() {
+            scheduler.return_from_break(last, now);
+        }
         let went_away = scheduler.set_away(away, now) && away;
         let pause_ended = scheduler.expire_pause(now);
         (scheduler.tick(now), went_away, pause_ended)
@@ -586,16 +619,53 @@ mod tests {
         assert_eq!(s.tick(25 * MIN).len(), 1);
     }
 
+    fn next_due(s: &Scheduler, id: &str) -> u64 {
+        s.entries
+            .iter()
+            .find(|e| e.reminder.id == id)
+            .unwrap()
+            .next_due
+    }
+
     #[test]
-    fn away_blocks_and_return_restarts() {
+    fn away_blocks_popups() {
         let mut s = one(10);
         assert!(s.set_away(true, 5 * MIN));
         assert!(!s.set_away(true, 6 * MIN), "no change");
         assert!(s.tick(10 * MIN).is_empty());
         assert_eq!(s.status_text(10 * MIN), "Paused while you're away");
-        assert!(s.set_away(false, 30 * MIN));
-        assert!(s.tick(39 * MIN).is_empty());
-        assert_eq!(s.tick(40 * MIN).len(), 1);
+    }
+
+    #[test]
+    fn return_restarts_eyes_and_stand_but_resumes_water() {
+        let mut s = scheduler(presets()); // water 45, eyes 20, stand 60
+        s.set_away(true, 10 * MIN);
+        s.set_away(false, 40 * MIN); // away 30 min
+                                     // Water had 35 min left when you left, so it still has 35.
+        assert_eq!(next_due(&s, "water"), 75 * MIN);
+        // Eyes and stand start fresh from your return.
+        assert_eq!(next_due(&s, "eyes"), 60 * MIN);
+        assert_eq!(next_due(&s, "stand"), 100 * MIN);
+    }
+
+    #[test]
+    fn popup_closed_while_away_returns_when_resumed() {
+        let mut water = presets().remove(0);
+        water.interval_minutes = 10;
+        let mut s = scheduler(vec![water]);
+        assert_eq!(s.tick(10 * MIN).len(), 1); // on screen
+        s.set_away(true, 11 * MIN); // closed because you left
+        s.set_away(false, 30 * MIN);
+        // It was due when you left, so it's due again on return.
+        assert_eq!(s.tick(30 * MIN).len(), 1);
+    }
+
+    #[test]
+    fn sleep_gap_uses_break_rules() {
+        let mut s = scheduler(presets());
+        s.return_from_break(5 * MIN, 125 * MIN); // lid closed for 2 hours
+        assert_eq!(next_due(&s, "water"), 165 * MIN);
+        assert_eq!(next_due(&s, "eyes"), 145 * MIN);
     }
 
     #[test]

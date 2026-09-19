@@ -74,7 +74,9 @@ export function GeneralSettings({ general, onChange, onPause, onResume }: Props)
             Pause while I'm away
           </label>
           <span className="setting-help">
-            Stops reminders when you haven't touched the keyboard or mouse, and starts them fresh when you're back.
+            Reminders stop when your screen is locked or asleep, or when you haven't used the keyboard or mouse,
+            unless a video or call is keeping the screen on. When you're back, eye and stand-up reminders start
+            fresh; water and your own reminders continue where they left off.
           </span>
         </div>
         <div className="setting-control">

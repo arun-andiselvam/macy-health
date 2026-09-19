@@ -64,6 +64,13 @@ impl Reminder {
         self.kind == CUSTOM_KIND
     }
 
+    /// Whether time away from the computer counts as having done it. Eye rest
+    /// and standing up happen naturally when you step away; drinking water and
+    /// custom reminders don't, so their countdown pauses and resumes instead.
+    pub fn restarts_after_break(&self) -> bool {
+        matches!(self.kind.as_str(), "eyes" | "stand")
+    }
+
     /// Whether this reminder may fire at the given local time.
     pub fn is_active_at(&self, local: LocalTime) -> bool {
         if !self.days.contains(&local.weekday) {
